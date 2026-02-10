@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 import time
 from html import unescape
 from urllib.request import urlopen
@@ -30,6 +32,22 @@ URL = "https://menus.campus-dining.com/eliorna/d1031"
 OUTPUT_JSON = "menus_dropdown.json"
 MAX_DATES = 10
 PERIOD_ORDER = {"Breakfast": 0, "Lunch": 1, "Dinner": 2}
+
+
+def try_install_playwright_stack() -> bool:
+    """Best-effort install of Playwright + Chromium runtime dependencies."""
+    commands = [
+        [sys.executable, "-m", "pip", "install", "playwright"],
+        [sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
+    ]
+    for command in commands:
+        try:
+            print(f"Bootstrapping dependency: {' '.join(command)}")
+            subprocess.run(command, check=True)
+        except Exception as exc:
+            print(f"Dependency bootstrap failed: {exc}")
+            return False
+    return True
 
 
 def build_sections(items: List[Dict]) -> List[Dict]:
@@ -223,7 +241,8 @@ def has_no_menu_message(page: Page) -> bool:
     return False
 
 
-def scrape() -> None:
+def scrape(attempted_bootstrap: bool = False) -> None:
+    global sync_playwright, Page, TimeoutError
     results: List[Dict] = []
 
     try:
@@ -287,6 +306,17 @@ def scrape() -> None:
             context.close()
             browser.close()
     except Exception as exc:
+        missing_runtime = (
+            "playwright is not installed" in str(exc)
+            or "error while loading shared libraries" in str(exc)
+        )
+        if missing_runtime and not attempted_bootstrap:
+            print("Playwright runtime unavailable. Attempting automatic dependency bootstrap...")
+            if try_install_playwright_stack():
+                if sync_playwright is None:
+                    from playwright.sync_api import Page, TimeoutError, sync_playwright
+                return scrape(attempted_bootstrap=True)
+
         print(f"Playwright run failed ({exc}). Falling back to static HTML scrape for current menu.")
 
         html = urlopen(URL, timeout=25).read().decode("utf-8", "ignore")
@@ -306,8 +336,7 @@ def scrape() -> None:
 
             print(
                 "Fallback collected current menu only. "
-                "For full multi-date scraping, install browser deps: "
-                "`python -m playwright install --with-deps chromium`."
+                "For full multi-date scraping, ensure Playwright and Chromium dependencies are installed."
             )
         else:
             raise RuntimeError("Fallback scrape failed: could not parse menu HTML") from exc
