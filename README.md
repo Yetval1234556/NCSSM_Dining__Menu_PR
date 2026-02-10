@@ -8,7 +8,7 @@ A Python + Playwright project that scrapes NCSSM dining menus and generates a mo
   - Scrapes the next **10 upcoming days**.
   - Handles days with no menu data.
   - Uses resilient date/meal-period selection logic for the Ten Kites UI.
-- **Single-file dashboard output** (`page.html`)
+- **Single-file dashboard output** (`index.html`)
   - Dark mode layout with responsive cards.
   - Meal filters (All / Breakfast / Lunch / Dinner).
   - Client-side search with highlighting.
@@ -21,7 +21,7 @@ A Python + Playwright project that scrapes NCSSM dining menus and generates a mo
 1. `scraper.py` opens the dining site with Playwright and collects menu JSON payloads.
 2. The data is written to `menus_dropdown.json`.
 3. `run_all.py` transforms that data into grouped day/meal structure.
-4. `run_all.py` renders `page.html` with embedded CSS/JS.
+4. `run_all.py` renders `index.html` (and compatibility `page.html`) with embedded CSS/JS.
 5. (Optional) It starts a local web server and opens the page in your browser.
 
 ## Prerequisites
@@ -62,7 +62,8 @@ PY
 ## Generated files
 
 - `menus_dropdown.json` — raw scraped entries (`date`, `period`, `sections`)
-- `page.html` — generated dashboard
+- `index.html` — generated dashboard (primary)
+- `page.html` — compatibility alias of the same dashboard
 
 ## Project files
 
