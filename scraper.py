@@ -9,11 +9,22 @@ This version keeps interactions simple and resilient:
 from __future__ import annotations
 
 import json
+import re
 import time
+from html import unescape
+from urllib.request import urlopen
 from datetime import datetime
 from typing import Dict, List
 
-from playwright.sync_api import Page, TimeoutError, sync_playwright
+try:
+    from playwright.sync_api import Page, TimeoutError, sync_playwright
+except ModuleNotFoundError:
+    Page = object  # type: ignore[assignment]
+
+    class TimeoutError(Exception):
+        """Fallback timeout type when Playwright is unavailable."""
+
+    sync_playwright = None
 
 URL = "https://menus.campus-dining.com/eliorna/d1031"
 OUTPUT_JSON = "menus_dropdown.json"
@@ -215,62 +226,91 @@ def has_no_menu_message(page: Page) -> bool:
 def scrape() -> None:
     results: List[Dict] = []
 
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context(ignore_https_errors=True)
-        page = context.new_page()
-        page.set_default_timeout(45000)
+    try:
+        if sync_playwright is None:
+            raise ModuleNotFoundError("playwright is not installed")
 
-        print(f"Navigating to {URL}...")
-        page.goto(URL, wait_until="domcontentloaded")
-        page.wait_for_selector(".k10-menu-date-selector__panel", state="attached")
-        page.wait_for_selector(".k10-menu-selector__panel", state="attached")
-        page.wait_for_selector("[data-menu-json]", state="attached")
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(ignore_https_errors=True)
+            page = context.new_page()
+            page.set_default_timeout(45000)
 
-        dates = collect_date_options(page)
-        print(f"Found {len(dates)} upcoming dates")
+            print(f"Navigating to {URL}...")
+            page.goto(URL, wait_until="domcontentloaded")
+            page.wait_for_selector(".k10-menu-date-selector__panel", state="attached")
+            page.wait_for_selector(".k10-menu-selector__panel", state="attached")
+            page.wait_for_selector("[data-menu-json]", state="attached")
 
-        for date_label in dates:
-            print(f"Processing {date_label}")
-            if not select_date(page, date_label):
-                print(f"  - Failed selecting date {date_label}")
-                continue
+            dates = collect_date_options(page)
+            print(f"Found {len(dates)} upcoming dates")
 
-            if has_no_menu_message(page):
-                print("  - No menu available")
-                continue
-
-            try:
-                periods = available_periods(page)
-            except TimeoutError:
-                print("  - No periods found")
-                continue
-
-            for period in periods:
-                if not select_period(page, period):
-                    print(f"  - Failed selecting period {period}")
+            for date_label in dates:
+                print(f"Processing {date_label}")
+                if not select_date(page, date_label):
+                    print(f"  - Failed selecting date {date_label}")
                     continue
 
-                payload_raw = get_menu_json(page)
-                if not payload_raw:
+                if has_no_menu_message(page):
+                    print("  - No menu available")
                     continue
 
                 try:
-                    payload = json.loads(payload_raw)
-                except json.JSONDecodeError:
-                    print(f"  - Invalid JSON payload for {period}")
+                    periods = available_periods(page)
+                except TimeoutError:
+                    print("  - No periods found")
                     continue
 
-                results.append(
-                    {
-                        "date": date_label,
-                        "period": period,
-                        "sections": build_sections(payload.get("items", [])),
-                    }
-                )
+                for period in periods:
+                    if not select_period(page, period):
+                        print(f"  - Failed selecting period {period}")
+                        continue
 
-        context.close()
-        browser.close()
+                    payload_raw = get_menu_json(page)
+                    if not payload_raw:
+                        continue
+
+                    try:
+                        payload = json.loads(payload_raw)
+                    except json.JSONDecodeError:
+                        print(f"  - Invalid JSON payload for {period}")
+                        continue
+
+                    results.append(
+                        {
+                            "date": date_label,
+                            "period": period,
+                            "sections": build_sections(payload.get("items", [])),
+                        }
+                    )
+
+            context.close()
+            browser.close()
+    except Exception as exc:
+        print(f"Playwright run failed ({exc}). Falling back to static HTML scrape for current menu.")
+
+        html = urlopen(URL, timeout=25).read().decode("utf-8", "ignore")
+        date_match = re.search(r'k10-menu-date-selector__name">\s*([^<]+)', html)
+        period_match = re.search(r'k10-menu-selector__name">\s*([^<]+)', html)
+        payload_match = re.search(r'data-menu-json="([^"]+)"', html)
+
+        if date_match and period_match and payload_match:
+            payload = json.loads(unescape(payload_match.group(1)))
+            results.append(
+                {
+                    "date": date_match.group(1).strip(),
+                    "period": period_match.group(1).strip(),
+                    "sections": build_sections(payload.get("items", [])),
+                }
+            )
+
+            print(
+                "Fallback collected current menu only. "
+                "For full multi-date scraping, install browser deps: "
+                "`python -m playwright install --with-deps chromium`."
+            )
+        else:
+            raise RuntimeError("Fallback scrape failed: could not parse menu HTML") from exc
 
     with open(OUTPUT_JSON, "w", encoding="utf-8") as file:
         json.dump(results, file, ensure_ascii=False, indent=2)
