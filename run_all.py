@@ -205,6 +205,33 @@ def render_html(days):
         gap: 12px;
         box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
     }
+
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px;
+        margin-bottom: 18px;
+    }
+
+    .stat {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        padding: 10px 12px;
+    }
+
+    .stat-label {
+        color: var(--text-muted);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+
+    .stat-value {
+        font-weight: 700;
+        font-size: 1.2rem;
+        margin-top: 2px;
+    }
     
     .filter-group {
         display: flex;
@@ -244,7 +271,7 @@ def render_html(days):
     .search-container {
         position: relative;
         flex-grow: 1;
-        max-width: 300px;
+        max-width: 360px;
     }
     
     .search-input {
@@ -273,6 +300,46 @@ def render_html(days):
         height: 16px;
         fill: var(--text-muted);
         pointer-events: none;
+    }
+
+    .clear-search {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        border: 0;
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 1.2rem;
+        line-height: 1;
+        padding: 4px 8px;
+        display: none;
+    }
+
+    .search-container.has-query .clear-search { display: block; }
+
+    .quick-days {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 28px;
+    }
+
+    .day-chip {
+        border: 1px solid var(--border-subtle);
+        background: rgba(255,255,255,0.02);
+        color: var(--text-muted);
+        border-radius: 999px;
+        padding: 5px 10px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        text-decoration: none;
+    }
+
+    .day-chip:hover {
+        color: var(--text-main);
+        border-color: rgba(255,255,255,0.2);
     }
     
     /* Content Layout */
@@ -441,11 +508,21 @@ def render_html(days):
                 m.style.display = 'none';
             }
         });
+        applyDayVisibility();
+    }
+
+    function applyDayVisibility() {
+        document.querySelectorAll('.day-card').forEach(day => {
+            const visibleMeals = Array.from(day.querySelectorAll('.meal-card')).filter(m => m.style.display !== 'none');
+            day.style.display = visibleMeals.length ? '' : 'none';
+        });
     }
     
     function searchItems(query) {
         query = query.toLowerCase();
         const items = document.querySelectorAll('.menu-item');
+        const searchContainer = document.querySelector('.search-container');
+        searchContainer.classList.toggle('has-query', query.length > 0);
         
         items.forEach(item => {
             const text = item.textContent.toLowerCase();
@@ -459,7 +536,12 @@ def render_html(days):
         // Hide meals with no matches if searching? 
         // Or just highlight? Let's hide sections that don't match if query is long enough
         if(query.length < 2) {
-            document.querySelectorAll('.day-card, .meal-card, .section').forEach(el => el.style.display = '');
+            document.querySelectorAll('.meal-card, .section').forEach(el => el.style.display = '');
+            document.querySelectorAll('.meal-card').forEach(card => {
+                card.style.opacity = '1';
+                card.style.borderColor = '';
+            });
+            applyDayVisibility();
             return;
         }
         
@@ -473,13 +555,31 @@ def render_html(days):
             if(hasMatch) {
                 card.style.opacity = '1';
                 card.style.borderColor = 'var(--color-accent)';
+                card.style.display = '';
             } else {
-                card.style.opacity = '0.3';
+                card.style.opacity = '0.35';
                 card.style.borderColor = '';
+                card.style.display = 'none';
             }
         });
+        applyDayVisibility();
+    }
+
+    function clearSearch() {
+        const input = document.getElementById('menu-search');
+        input.value = '';
+        searchItems('');
+        input.focus();
     }
     """
+
+    total_meals = sum(len(day.get("meals", [])) for day in days)
+    total_items = sum(
+        len(section.get("items", []))
+        for day in days
+        for meal in day.get("meals", [])
+        for section in meal.get("sections", [])
+    )
 
     html_parts = [
         "<!DOCTYPE html>",
@@ -497,6 +597,11 @@ def render_html(days):
         "<h1>On The Menu</h1>",
         "<div class='subtitle'>Fresh, nutritious meals for the NCSSM community.</div>",
         "</header>",
+        "<div class='stats-row'>",
+        f"<div class='stat'><div class='stat-label'>Days</div><div class='stat-value'>{len(days)}</div></div>",
+        f"<div class='stat'><div class='stat-label'>Meals</div><div class='stat-value'>{total_meals}</div></div>",
+        f"<div class='stat'><div class='stat-label'>Items</div><div class='stat-value'>{total_items}</div></div>",
+        "</div>",
         
         "<div class='controls-bar'>",
         "<div class='filter-group'>",
@@ -507,12 +612,19 @@ def render_html(days):
         "</div>",
         "<div class='search-container'>",
         "<svg class='search-icon' viewBox='0 0 24 24'><path d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' stroke='currentColor' stroke-width='2' fill='none'/></svg>",
-        "<input type='text' class='search-input' placeholder='Find food (e.g. Pizza)...' oninput='searchItems(this.value)'>",
+        "<input id='menu-search' type='text' class='search-input' placeholder='Find food (e.g. Pizza)...' oninput='searchItems(this.value)'>",
+        "<button class='clear-search' title='Clear search' onclick='clearSearch()'>&times;</button>",
         "</div>",
         "</div>",
-        
-        "<div class='main-content'>"
+        "<div class='quick-days'>",
     ]
+
+    for i, day in enumerate(days):
+        day_name = day['label'].split(',')[0]
+        html_parts.append(f"<a class='day-chip' href='#day-{i}'>{html.escape(day_name)}</a>")
+
+    html_parts.append("</div>")
+    html_parts.append("<div class='main-content'>")
 
     for i, day in enumerate(days):
         # Split label
@@ -520,7 +632,7 @@ def render_html(days):
         day_name = label_parts[0]
         date_val = label_parts[1] if len(label_parts) > 1 else ""
         
-        html_parts.append(f"<div class='day-card'>")
+        html_parts.append(f"<div class='day-card' id='day-{i}'>")
         html_parts.append(f"<div class='day-header'><h2>{day_name}</h2><div class='day-date'>{date_val}</div></div>")
         
         if not day['meals']:
