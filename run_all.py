@@ -4,7 +4,7 @@ AIO Script: Scrapes NCSSM Morganton dining menus and generates a beautiful HTML 
 Steps:
 1. Runs scrape_dropdowns_v2.py to fetch latest data to menus_dropdown.json.
 2. Reads menus_dropdown.json.
-3. specifices a dark-themed, responsive HTML page (page.html) with dropdowns for days/meals.
+3. Generates a dark-themed, responsive HTML page (index.html) with dropdowns for days/meals.
 """
 
 import json
@@ -18,7 +18,8 @@ import subprocess
 # Let's run as subprocess to ensure clean state for Playwright.
 SCRAPER_SCRIPT = "scraper.py"
 OUTPUT_JSON = "menus_dropdown.json"
-OUTPUT_HTML = "page.html"
+OUTPUT_HTML = "index.html"
+LEGACY_OUTPUT_HTML = "page.html"
 
 def run_scraper():
     print(f"=== Step 1: Running Scraper ({SCRAPER_SCRIPT}) ===")
@@ -673,8 +674,15 @@ def render_html(days):
     html_parts.append(f"<script>{js}</script>")
     html_parts.append("</div></body></html>")
     
+    rendered_html = "".join(html_parts)
     with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
-        f.write("".join(html_parts))
+        f.write(rendered_html)
+
+    # Write a legacy alias so old bookmarks/scripts using page.html still work.
+    if LEGACY_OUTPUT_HTML != OUTPUT_HTML:
+        with open(LEGACY_OUTPUT_HTML, "w", encoding="utf-8") as legacy_file:
+            legacy_file.write(rendered_html)
+
     print(f"[OK] HTML generated at: {Path(OUTPUT_HTML).absolute()}")
 
 def serve_locally():
@@ -683,12 +691,20 @@ def serve_locally():
     import webbrowser
 
     PORT = 8000
-    Handler = http.server.SimpleHTTPRequestHandler
+    class DashboardHandler(http.server.SimpleHTTPRequestHandler):
+        def list_directory(self, path):
+            self.send_error(404, "Directory listing is disabled. Open /index.html")
+            return None
+
+        def do_GET(self):
+            if self.path in {"", "/", "/index"}:
+                self.path = f"/{OUTPUT_HTML}"
+            super().do_GET()
     
     # Try to find a free port
     while True:
         try:
-            with socketserver.TCPServer(("", PORT), Handler) as httpd:
+            with socketserver.TCPServer(("", PORT), DashboardHandler) as httpd:
                 url = f"http://localhost:{PORT}/{OUTPUT_HTML}"
                 print(f"\n=== Step 4: Starting Local Server ===")
                 print(f"Serving at {url}")
@@ -701,7 +717,7 @@ def serve_locally():
                     print("\nServer stopped.")
                 break
         except OSError as e:
-            if e.errno == 10048:
+            if e.errno in (98, 10048):
                 print(f"Port {PORT} is busy, trying {PORT+1}...")
                 PORT += 1
             else:
